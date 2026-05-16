@@ -1,0 +1,377 @@
+"""Hermes Qt Shell — native desktop frontend for Hermes Agent + Workspace on Arch Linux.
+One app. Chat, Conductor, Dashboard, Model switching, Voice — all local. Zero web."""
+import sys
+import os
+import json
+import queue
+import threading
+from pathlib import Path
+from PySide6 import QtWidgets, QtCore, QtGui
+import config_reader
+import api_client
+import subprocess
+import os
+
+
+class HermesTrayIcon(QtWidgets.QSystemTrayIcon):
+    def __init__(self, app_window, parent=None):
+        super().__init__(parent)
+        self.app_window = app_window
+        self.setToolTip("Hermes Qt Shell 🔥🦊")
+        self.activated.connect(self._activated)
+        self._build_menu()
+
+    def _build_menu(self):
+        menu = QtWidgets.QMenu()
+        action_show = menu.addAction("Show / Hide")
+        action_show.triggered.connect(self._toggle_window)
+        menu.addSeparator()
+        action_chat = menu.addAction("Quick Chat")
+        action_chat.triggered.connect(lambda: self.app_window.show_tab("chat"))
+        action_conductor = menu.addAction("Conductor")
+        action_conductor.triggered.connect(lambda: self.app_window.show_tab("conductor"))
+        menu.addSeparator()
+        action_quit = menu.addAction("Quit")
+        action_quit.triggered.connect(QtWidgets.QApplication.quit)
+        self.setContextMenu(menu)
+
+    def _activated(self, reason):
+        if reason == QtWidgets.QSystemTrayIcon.ActivationReason.DoubleClick:
+            self._toggle_window()
+
+    def _toggle_window(self):
+        if self.app_window.isVisible():
+            self.app_window.hide()
+        else:
+            self.app_window.show()
+            self.app_window.raise_()
+            self.app_window.activateWindow()
+
+
+class ChatPanel(QtWidgets.QWidget):
+    message_sent = QtCore.Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setLayout(QtWidgets.QVBoxLayout())
+        self._build_ui()
+
+    def _build_ui(self):
+        self.chat_display = QtWidgets.QTextEdit(self)
+        self.chat_display.setReadOnly(True)
+        font = QtGui.QFont("monospace", 10)
+        self.chat_display.setFont(font)
+        self.layout().addWidget(self.chat_display)
+
+        input_row = QtWidgets.QHBoxLayout()
+        self.msg_input = QtWidgets.QLineEdit(self)
+        self.msg_input.setPlaceholderText("Ask Hermes… (Ctrl+Enter to send)")
+        self.msg_input.returnPressed.connect(self._send)
+        input_row.addWidget(self.msg_input, stretch=1)
+
+        self.voice_btn = QtWidgets.QPushButton("🎙", self)
+        self.voice_btn.setToolTip("Voice input (Ctrl+B)")
+        self.voice_btn.setCheckable(True)
+        self.voice_btn.clicked.connect(self._toggle_voice)
+        input_row.addWidget(self.voice_btn)
+
+        self.send_btn = QtWidgets.QPushButton("Send", self)
+        self.send_btn.clicked.connect(self._send)
+        input_row.addWidget(self.send_btn)
+
+        self.layout().addLayout(input_row)
+
+    def _send(self):
+        text = self.msg_input.text().strip()
+        if not text:
+            return
+        self.append_message("User", text)
+        self.msg_input.clear()
+        self.message_sent.emit(text)
+
+    def append_message(self, role: str, text: str):
+        self.chat_display.append(f"<b>{role}:</b> {text}\n")
+
+    def _toggle_voice(self, checked: bool):
+        if checked:
+            self.voice_btn.setText("🔴")
+            self.append_message("System", "Listening…")
+        else:
+            self.voice_btn.setText("🎙")
+
+
+class ConductorPanel(QtWidgets.QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setLayout(QtWidgets.QVBoxLayout())
+        self._build_ui()
+
+    def _build_ui(self):
+        header = QtWidgets.QLabel("Conductor — Parallel Agent Grid")
+        header.setStyleSheet("font-size: 16px; font-weight: bold;")
+        self.layout().addWidget(header)
+
+        self.grid = QtWidgets.QGridLayout()
+        for i in range(4):
+            card = QtWidgets.QGroupBox(f"Worker {i+1}")
+            card_layout = QtWidgets.QVBoxLayout(card)
+            status = QtWidgets.QLabel("Idle")
+            status.setObjectName("status")
+            card_layout.addWidget(status)
+            self.grid.addWidget(card, i // 2, i % 2)
+        self.layout().addLayout(self.grid)
+
+        btn_row = QtWidgets.QHBoxLayout()
+        spawn_btn = QtWidgets.QPushButton("Spawn Subagent")
+        kill_btn = QtWidgets.QPushButton("Kill All")
+        btn_row.addWidget(spawn_btn)
+        btn_row.addWidget(kill_btn)
+        btn_row.addStretch(1)
+        self.layout().addLayout(btn_row)
+        self.layout().addStretch(1)
+
+
+class DashboardPanel(QtWidgets.QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setLayout(QtWidgets.QVBoxLayout())
+        self._build_ui()
+
+    def _build_ui(self):
+        header = QtWidgets.QLabel("Dashboard")
+        header.setStyleSheet("font-size: 16px; font-weight: bold;")
+        self.layout().addWidget(header)
+
+        self.metrics = QtWidgets.QFormLayout()
+        self.sessions_count = QtWidgets.QLabel("—")
+        self.total_tokens = QtWidgets.QLabel("—")
+        self.active_model = QtWidgets.QLabel("—")
+        self.provider_status = QtWidgets.QLabel("—")
+        self.metrics.addRow("Active Model:", self.active_model)
+        self.metrics.addRow("Provider Status:", self.provider_status)
+        self.metrics.addRow("Sessions:", self.sessions_count)
+        self.metrics.addRow("Est. Tokens:", self.total_tokens)
+        self.layout().addLayout(self.metrics)
+        self.layout().addStretch(1)
+
+    def update_metrics(self, model: str, provider: str, sessions: int, tokens: int):
+        self.active_model.setText(model)
+        self.provider_status.setText(provider)
+        self.sessions_count.setText(str(sessions))
+        self.total_tokens.setText(str(tokens))
+
+
+class TerminalPanel(QtWidgets.QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setLayout(QtWidgets.QVBoxLayout())
+        self._build_ui()
+
+    def _build_ui(self):
+        header = QtWidgets.QLabel("Terminal")
+        header.setStyleSheet("font-size: 16px; font-weight: bold;")
+        self.layout().addWidget(header)
+
+        self.term_display = QtWidgets.QTextEdit(self)
+        self.term_display.setReadOnly(True)
+        font = QtGui.QFont("monospace", 10)
+        self.term_display.setFont(font)
+        self.layout().addWidget(self.term_display)
+
+        input_row = QtWidgets.QHBoxLayout()
+        self.term_input = QtWidgets.QLineEdit(self)
+        self.term_input.setPlaceholderText("Shell command…")
+        self.term_input.returnPressed.connect(self._run_cmd)
+        input_row.addWidget(self.term_input, stretch=1)
+        go_btn = QtWidgets.QPushButton("Run")
+        go_btn.clicked.connect(self._run_cmd)
+        input_row.addWidget(go_btn)
+        self.layout().addLayout(input_row)
+
+    def _run_cmd(self):
+        cmd = self.term_input.text().strip()
+        if not cmd:
+            return
+        self.term_display.append(f"$ {cmd}")
+        self.term_input.clear()
+        self._exec(cmd)
+
+    def _exec(self, cmd: str):
+        def worker():
+            import subprocess
+            try:
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+                out = (result.stdout + result.stderr).strip() or "(no output)"
+            except Exception as e:
+                out = f"Error: {e}"
+            self._append_delayed(out)
+
+        t = threading.Thread(target=worker, daemon=True)
+        t.start()
+
+    def _append_delayed(self, text: str):
+        QtCore.QMetaObject.invokeMethod(
+            self.term_display, "append", QtCore.Qt.QueuedConnection,
+            QtCore.Q_ARG(str, text)
+        )
+
+
+class SettingsPanel(QtWidgets.QWidget):
+    model_changed = QtCore.Signal(str, str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setLayout(QtWidgets.QVBoxLayout())
+        self._build_ui()
+        self._load_config()
+
+    def _build_ui(self):
+        header = QtWidgets.QLabel("Settings")
+        header.setStyleSheet("font-size: 16px; font-weight: bold;")
+        self.layout().addWidget(header)
+
+        self.provider_combo = QtWidgets.QComboBox(self)
+        self.provider_combo.currentTextChanged.connect(self._on_provider_changed)
+        self.layout().addWidget(QtWidgets.QLabel("Provider:"))
+        self.layout().addWidget(self.provider_combo)
+
+        self.model_combo = QtWidgets.QComboBox(self)
+        self.layout().addWidget(QtWidgets.QLabel("Model:"))
+        self.layout().addWidget(self.model_combo)
+
+        btn_apply = QtWidgets.QPushButton("Apply & Reload")
+        btn_apply.clicked.connect(self._apply)
+        self.layout().addWidget(btn_apply)
+
+        self.stt_label = QtWidgets.QLabel("STT: local (faster-whisper)")
+        self.tts_label = QtWidgets.QLabel("TTS: edge (cloud — switch to piper for local)")
+        self.layout().addWidget(self.stt_label)
+        self.layout().addWidget(self.tts_label)
+
+        self.layout().addStretch(1)
+
+    def _load_config(self):
+        cfg = config_reader.load_config()
+        providers = config_reader.get_providers(cfg)
+        self.provider_combo.blockSignals(True)
+        self.provider_combo.clear()
+        for name, base_url, api_key, models, default_model in providers:
+            self.provider_combo.addItem(name, (base_url, api_key, models, default_model))
+        self.provider_combo.blockSignals(False)
+        if providers:
+            self._on_provider_changed(self.provider_combo.currentText())
+
+    def _on_provider_changed(self, name: str):
+        data = self.provider_combo.currentData()
+        if not data:
+            return
+        base_url, api_key, models, default_model = data
+        self.model_combo.clear()
+        for m in models:
+            self.model_combo.addItem(m)
+        idx = self.model_combo.findText(default_model)
+        if idx >= 0:
+            self.model_combo.setCurrentIndex(idx)
+
+    def _apply(self):
+        name = self.provider_combo.currentText()
+        model = self.model_combo.currentText()
+        self.model_changed.emit(name, model)
+
+
+class HermesMainWindow(QtWidgets.QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Hermes Qt Shell 🔥🦊")
+        self.setMinimumSize(1000, 700)
+        self._build_ui()
+        self._apply_dark_theme()
+
+    def _build_ui(self):
+        toolbar = QtWidgets.QToolBar("Main")
+        self.addToolBar(toolbar)
+
+        self.tabs = QtWidgets.QTabWidget(self)
+        self.setCentralWidget(self.tabs)
+
+        self.chat_panel = ChatPanel()
+        self.tabs.addTab(self.chat_panel, "Chat")
+
+        self.conductor_panel = ConductorPanel()
+        self.tabs.addTab(self.conductor_panel, "Conductor")
+
+        self.dashboard_panel = DashboardPanel()
+        self.tabs.addTab(self.dashboard_panel, "Dashboard")
+
+        self.terminal_panel = TerminalPanel()
+        self.tabs.addTab(self.terminal_panel, "Terminal")
+
+        self.settings_panel = SettingsPanel()
+        self.settings_panel.model_changed.connect(self._on_model_changed)
+        self.tabs.addTab(self.settings_panel, "Settings")
+
+        self.chat_panel.message_sent.connect(self._handle_chat)
+
+        # Status bar
+        self.status = QtWidgets.QLabel("Ready | Model: —")
+        self.statusBar().addWidget(self.status)
+
+    def _apply_dark_theme(self):
+        self.setStyleSheet("""
+            QMainWindow { background: #1a1a2e; color: #e0e0e0; }
+            QWidget { background: #1a1a2e; color: #e0e0e0; }
+            QTabWidget::pane { border: 1px solid #333; }
+            QTabBar::tab { background: #16213e; padding: 8px 16px; margin: 2px; }
+            QTabBar::tab:selected { background: #0f3460; }
+            QTextEdit, QLineEdit { background: #0f0f1a; color: #e0e0e0; border: 1px solid #333; }
+            QPushButton { background: #0f3460; color: #e0e0e0; padding: 6px 12px; border: none; }
+            QPushButton:hover { background: #1a5da4; }
+            QComboBox { background: #0f0f1a; color: #e0e0e0; padding: 4px; }
+            QLabel { color: #e0e0e0; }
+        """)
+
+    def _on_model_changed(self, provider: str, model: str):
+        self.status.setText(f"Ready | Provider: {provider} | Model: {model}")
+        self.dashboard_panel.update_metrics(model, provider, 0, 0)
+
+    def _handle_chat(self, text: str):
+        # Pipe to local Ollama by default
+        cfg = config_reader.load_config()
+        default_model = config_reader.get_default_model(cfg) or "qwen3.6:27b"
+        client = api_client.OllamaClient()
+        messages = [api_client.ChatMessage(role="user", content=text)]
+        def worker():
+            response = client.chat(default_model, messages)
+            QtCore.QMetaObject.invokeMethod(
+                self.chat_panel, "append_message", QtCore.Qt.QueuedConnection,
+                QtCore.Q_ARG(str, "Hermes"), QtCore.Q_ARG(str, response)
+            )
+        threading.Thread(target=worker, daemon=True).start()
+
+    def show_tab(self, name: str):
+        mapping = {"chat": 0, "conductor": 1, "dashboard": 2, "terminal": 3, "settings": 4}
+        if name in mapping:
+            self.tabs.setCurrentIndex(mapping[name])
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+
+def main():
+    app = QtWidgets.QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
+
+    main_window = HermesMainWindow()
+    tray = HermesTrayIcon(main_window)
+    # Fallback orange square icon (nora.png not found in skills)
+    pixmap = QtGui.QPixmap(64, 64)
+    pixmap.fill(QtGui.QColor("#ff6b35"))
+    tray.setIcon(QtGui.QIcon(pixmap))
+
+    tray.show()
+    main_window.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()

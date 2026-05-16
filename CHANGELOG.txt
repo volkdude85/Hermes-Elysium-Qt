@@ -1,0 +1,13 @@
+Hermes Elysium Changelog
+=========================
+
+2026-05-16  Renamed from Hermes Qt Shell to Hermes Elysium.
+Renamed project directory, all source references, .desktop file, and launcher.
+
+2026-05-15  Sessions backend + UI wiring
+- Added sessions_manager.py for persistent session storage under ~/.config/hermes-qt-shell/sessions/.
+- Added SessionsPanel to list saved sessions (title, msg count, date).
+- Wired New Session, Load Session, Save Session toolbar buttons to real backend.
+- Auto-save user and assistant messages into current session during chat.
+- Updated left nav + toolbar mappings to include Sessions.
+- Removed duplicate tab bar, simplified to single left nav + context toolbar + content stack.
