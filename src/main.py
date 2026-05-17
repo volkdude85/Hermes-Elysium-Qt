@@ -136,7 +136,7 @@ class ChatPanel(QtWidgets.QWidget):
 
     @QtCore.Slot(str, str)
     def _on_show_message(self, role: str, text: str):
-        self._append_styled(role, text)
+        self._append_terminal(role, text)
 
     def _build_ui(self):
         # Vertical splitter for thinking, chat log, and input
@@ -274,32 +274,43 @@ class ChatPanel(QtWidgets.QWidget):
         self._resize_input()
 
     @QtCore.Slot(str, str)
-    def _append_styled(self, role: str, text: str):
-        ts = datetime.now().strftime("%H:%M")
+    def _append_terminal(self, role: str, text: str):
+        """Render conversation as a terminal transcript — monospace, role-prefixed lines."""
+        ts = datetime.now().strftime("%H:%M:%S")
         r = role.lower()
         if r == "user":
-            bg, fg, align = "#0f3460", "#c0e0ff", "right"
+            prefix_color = "#c0e0ff"
+            prefix = f"[{ts}]"
         elif r in ("assistant", "hermes", "nora"):
-            bg, fg, align = "#1a1a2e", "#e0e0e0", "left"
+            prefix_color = "#e0e0e0"
+            prefix = f"[{ts}]"
         elif r == "tool":
-            bg, fg, align = "#0a1a0a", "#80ff80", "left"
+            prefix_color = "#80ff80"
+            prefix = f"[{ts}]"
         else:
-            bg, fg, align = "#222", "#ccc", "left"
+            prefix_color = "#ccc"
+            prefix = f"[{ts}]"
 
         import re
-        # Code blocks
-        parts = re.split(r'(```[\s\S]*?```)', text)
-        styled = []
-        for part in parts:
-            if part.startswith("```"):
-                code = part[3:-3].strip()
-                styled.append(f'<pre style="background:#0a0a18;border:1px solid #333;padding:6px;color:#80ff80;font-family:monospace;font-size:10px;margin:4px 0;">{code}</pre>')
-            else:
-                part = re.sub(r'`([^`]+)`', r'<code style="background:#0a0a18;border:1px solid #444;color:#ff6b6b;padding:1px 4px;font-family:monospace;font-size:10px;">\1</code>', part)
-                styled.append(part.replace("\n", "<br>"))
+        # Escape HTML in the body
+        body = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        # Re-apply code block formatting with monospace pre
+        body = re.sub(
+            r'```(.*?)```',
+            r'<pre style="background:#0a0a18;border:1px solid #333;padding:4px 8px;color:#80ff80;font-family:monospace;font-size:10px;margin:2px 0;">\1</pre>',
+            body, flags=re.DOTALL
+        )
+        body = body.replace("\n", "<br>")
 
-        html = f'<div style="margin:6px 0;text-align:{align};"><span style="display:inline-block;background:{bg};color:{fg};padding:8px 12px;border-radius:8px;max-width:80%;font-size:12px;">{"".join(styled)}</span><div style="font-size:9px;color:#555;margin-top:2px;">{role} • {ts}</div></div>'
-        self.chat_display.append(html)
+        line = (
+            f'<div style="font-family:JetBrains Mono,monospace;font-size:10px;'
+            f'margin:1px 0;white-space:pre-wrap;">'
+            f'<span style="color:{prefix_color};font-weight:bold;">{prefix}</span> '
+            f'<span style="color:#888;">{r.upper()}:</span> '
+            f'<span style="color:#ddd;">{body}</span>'
+            f'</div>'
+        )
+        self.chat_display.append(line)
 
     @QtCore.Slot(str)
     def set_thinking(self, text: str):
@@ -1404,6 +1415,20 @@ class HermesMainWindow(QtWidgets.QMainWindow):
         if model_name:
             self.sysmon.set_model(model_name)
         self.chat_panel.chat_display.clear()
+        # Terminal-style session load header
+        title = s.get("title", "Untitled") or "Untitled"
+        ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(s.get("created_at", 0)))
+        src = s.get("source", "unknown")
+        model_short = model_name.split("/")[-1].split(":")[0] if model_name else "—"
+        header = (
+            f'<div style="font-family:JetBrains Mono,monospace;font-size:11px;'
+            f'color:#e74c3c;padding:8px 4px;border-bottom:1px solid #333;'
+            f'margin-bottom:8px;">'
+            f'═══ SESSION: {title} ═══<br>'
+            f'<span style="color:#888;">{ts} · {src} · model: {model_short}</span>'
+            f'</div>'
+        )
+        self.chat_panel.chat_display.append(header)
         for msg in s.get("messages", []):
             role = msg.get("role", "user").capitalize()
             self.chat_panel.show_message.emit(role, msg.get("content", ""))
