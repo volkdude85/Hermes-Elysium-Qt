@@ -1,4 +1,4 @@
-# Hermes Elysium 🔥🦊
+# Hermes Elysium
 
 Native desktop frontend for Hermes Agent — chat, terminal, conductor, telemetry, and voice. Built with PySide6 and QTermWidget. Runs on any Linux desktop with Qt6.
 
