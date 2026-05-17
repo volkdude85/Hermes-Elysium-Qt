@@ -18,6 +18,11 @@ import health_monitor
 import terminal_embed
 import conductor_panel
 import konsole_embed
+import profiles_panel
+import auto_updater
+
+
+_ICON_DIR = Path(__file__).resolve().parent.parent / "assets"
 
 
 class HermesTrayIcon(QtWidgets.QSystemTrayIcon):
@@ -1083,6 +1088,13 @@ class HermesMainWindow(QtWidgets.QMainWindow):
 
         help_menu = menubar.addMenu("Help")
         help_menu.addAction("Docs")
+        self.auto_update_action = help_menu.addAction("✓ Auto-Update (every 6h)")
+        self.auto_update_action.setCheckable(True)
+        self.auto_update_action.setChecked(True)
+        self.auto_update_action.triggered.connect(self._toggle_auto_update)
+        self.update_action = help_menu.addAction("Check for Updates…")
+        self.update_action.triggered.connect(self._check_updates_now)
+        help_menu.addSeparator()
         help_menu.addAction("About")
 
         # Context-sensitive toolbar (below menubar)
@@ -1214,6 +1226,9 @@ class HermesMainWindow(QtWidgets.QMainWindow):
         self.sessions_panel.session_selected.connect(self._on_session_load)
         self.content_stack.addWidget(self.sessions_panel)
 
+        self.profiles_panel = profiles_panel.ProfilesPanel()
+        self.content_stack.addWidget(self.profiles_panel)
+
         self.conductor_panel = conductor_panel.ConductorPanel()
         self.content_stack.addWidget(self.conductor_panel)
 
@@ -1249,6 +1264,14 @@ class HermesMainWindow(QtWidgets.QMainWindow):
         count = len(self.current_session.get("messages", []))
         self.telemetry_panel.log(f"Session ready: {self.current_session_id} ({count} messages)")
 
+        # Auto-updater: checks every 6 hours, starts after 10s delay
+        self._updater = auto_updater.AutoUpdater(self)
+        self._updater.update_available.connect(self._on_update_available)
+        self._updater.up_to_date.connect(lambda: self.telemetry_panel.log("Updates: up to date"))
+        self._updater.check_failed.connect(lambda e: self.telemetry_panel.log(f"Updates: check failed — {e}"))
+        self._updater.update_applied.connect(lambda s: self.telemetry_panel.log(f"Updates: applied — {s[:80]}"))
+        self._updater.start()
+
     def _toggle_sidebar(self):
         self.left_nav.setVisible(not self.left_nav.isVisible())
 
@@ -1278,10 +1301,11 @@ class HermesMainWindow(QtWidgets.QMainWindow):
 
         mapping = {
             "Chat": 0, "Sessions": 1,
-            "Conductor": 2, "Dashboard": 3,
-            "Terminal": 4, "Telemetry": 5,
-            "Settings": 6, "Models": 6, "Providers": 6,
-            "Voice": 6, "Display": 6, "Theme": 6
+            "Profiles": 2,
+            "Conductor": 3, "Dashboard": 4,
+            "Terminal": 5, "Telemetry": 6,
+            "Settings": 7, "Models": 7, "Providers": 7,
+            "Voice": 7, "Display": 7, "Theme": 7
         }
         if name in mapping:
             self.content_stack.setCurrentIndex(mapping[name])
@@ -1312,10 +1336,11 @@ class HermesMainWindow(QtWidgets.QMainWindow):
         self._update_toolbar("config", name)
         mapping = {
             "Chat": 0, "Sessions": 1,
-            "Conductor": 2, "Dashboard": 3,
-            "Terminal": 4, "Telemetry": 5,
-            "Settings": 6, "Models": 6, "Providers": 6,
-            "Voice": 6, "Display": 6, "Theme": 6
+            "Profiles": 2,
+            "Conductor": 3, "Dashboard": 4,
+            "Terminal": 5, "Telemetry": 6,
+            "Settings": 7, "Models": 7, "Providers": 7,
+            "Voice": 7, "Display": 7, "Theme": 7
         }
         if name in mapping:
             self.content_stack.setCurrentIndex(mapping[name])
@@ -1488,6 +1513,33 @@ class HermesMainWindow(QtWidgets.QMainWindow):
         self.telemetry_panel.log("State saved — goodbye")
         super().closeEvent(event)
 
+    def _on_update_available(self, count: int, summary: str):
+        """User-facing notification when new commits are found."""
+        self.telemetry_panel.log(f"📦 Update available: {count} new commit{'s' if count != 1 else ''}")
+        reply = QtWidgets.QMessageBox.question(
+            self, "Update Available",
+            f"{count} new commit{'s' if count != 1 else ''} on GitHub.\n\n{summary}\n\nApply update now? (git pull)",
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+        )
+        if reply == QtWidgets.QMessageBox.StandardButton.Yes:
+            self._updater.apply_update()
+
+    def _check_updates_now(self):
+        """Manual 'Check for Updates' from Help menu."""
+        self.telemetry_panel.log("Updates: checking…")
+        self._updater._check_now()
+
+    def _toggle_auto_update(self, checked: bool):
+        """Toggle the 6-hour auto-update timer."""
+        if checked:
+            self._updater.start()
+            self.auto_update_action.setText("✓ Auto-Update (every 6h)")
+            self.telemetry_panel.log("Auto-update: enabled")
+        else:
+            self._updater.stop()
+            self.auto_update_action.setText("✗ Auto-Update (disabled)")
+            self.telemetry_panel.log("Auto-update: disabled")
+
 
 def main():
     app = QtWidgets.QApplication(sys.argv)
@@ -1496,10 +1548,11 @@ def main():
     app.setApplicationDisplayName("Hermes Elysium")
 
     main_window = HermesMainWindow()
+    icon_path = str(Path(__file__).resolve().parent.parent / "assets" / "hermes-icon-64.png")
+    app_icon = QtGui.QIcon(icon_path)
+    main_window.setWindowIcon(app_icon)
     tray = HermesTrayIcon(main_window)
-    pixmap = QtGui.QPixmap(64, 64)
-    pixmap.fill(QtGui.QColor("#ff6b35"))
-    tray.setIcon(QtGui.QIcon(pixmap))
+    tray.setIcon(app_icon)
 
     tray.show()
     main_window.show()
