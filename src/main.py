@@ -399,6 +399,10 @@ class TerminalPanel(QtWidgets.QWidget):
         self.layout().setContentsMargins(0, 0, 0, 0)
         self.layout().setSpacing(0)
         self._terminals = []
+        self._drag_start_tab = -1
+        self._drag_timer = QtCore.QTimer(self)
+        self._drag_timer.setInterval(100)
+        self._drag_timer.timeout.connect(self._poll_drag)
         self._build_ui()
 
     def _build_ui(self):
@@ -705,26 +709,20 @@ class TerminalPanel(QtWidgets.QWidget):
                     if tab_idx >= 0:
                         self._close_tab(tab_idx)
                         return True
-                # Track drag start for tear-off
+                # Track drag start for tear-off — use a timer to poll mouse position
                 elif event.button() == QtCore.Qt.MouseButton.LeftButton:
                     tab_idx = self.tab_bar.tabAt(event.pos())
                     if tab_idx >= 0:
                         self._drag_start_tab = tab_idx
                         self._drag_start_pos = event.globalPosition().toPoint()
+                        self._drag_timer.start()
                     else:
                         self._drag_start_tab = -1
-            # Drag tear-off: only fire when dragged significantly outside
-            elif etype == QtCore.QEvent.Type.MouseMove and event.buttons() & QtCore.Qt.MouseButton.LeftButton:
-                if hasattr(self, '_drag_start_tab') and self._drag_start_tab >= 0:
-                    delta = (event.globalPosition().toPoint() - self._drag_start_pos).manhattanLength()
-                    if delta > 80:
-                        idx = self._drag_start_tab
-                        self._drag_start_tab = -1
-                        if self.tab_bar.count() > 1:
-                            self._tear_off_tab(idx)
-                            return True
+                        self._drag_timer.stop()
+            # Drag tear-off: handled by _poll_drag timer instead (QTabBar doesn't forward MouseMove)
             elif etype == QtCore.QEvent.Type.MouseButtonRelease:
                 self._drag_start_tab = -1
+                self._drag_timer.stop()
             # Right-click context menu on tabs
             elif etype == QtCore.QEvent.Type.MouseButtonPress and event.button() == QtCore.Qt.MouseButton.RightButton:
                 tab_idx = self.tab_bar.tabAt(event.pos())
@@ -754,6 +752,20 @@ class TerminalPanel(QtWidgets.QWidget):
                 self._next_tab()
                 return True
         return super().eventFilter(obj, event)
+
+    def _poll_drag(self):
+        """Timer-based drag detection — QTabBar doesn't forward MouseMove events."""
+        if self._drag_start_tab < 0:
+            self._drag_timer.stop()
+            return
+        pos = QtGui.QCursor.pos()
+        delta = (pos - self._drag_start_pos).manhattanLength()
+        if delta > 80:
+            idx = self._drag_start_tab
+            self._drag_start_tab = -1
+            self._drag_timer.stop()
+            if self.tab_bar.count() > 1:
+                self._tear_off_tab(idx)
 
     def _tear_off_tab(self, idx):
         """Pop a tab out into its own floating window."""
