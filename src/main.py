@@ -726,7 +726,7 @@ class TerminalPanel(QtWidgets.QWidget):
                         tf.write(scrollback)
                         tf.close()
                         QtCore.QTimer.singleShot(
-                            500,
+                            600,
                             lambda tab_idx=new_idx, path=tf.name: self._replay_scrollback(tab_idx, path)
                         )
                 except Exception:
@@ -736,13 +736,32 @@ class TerminalPanel(QtWidgets.QWidget):
                 f"Could not reach Konsole via D-Bus.\nIs Konsole running?\n\n{e}")
 
     def _replay_scrollback(self, tab_idx: int, path: str):
-        """Replay a tempfile containing Konsole scrollback into the terminal at tab_idx."""
+        """Replay a tempfile containing Konsole scrollback into the terminal at tab_idx.
+        Uses printf for each line so ASCII art and special chars aren't executed by the shell."""
         w = self.terminal_stack.widget(tab_idx)
         if not w:
             return
         term = w.findChild(QtWidgets.QWidget, "konsole_widget")
-        if term and hasattr(term, "send_text"):
-            term.send_text(f"cat {shlex.quote(path)} 2>/dev/null; rm -f {shlex.quote(path)}\n")
+        if not term or not hasattr(term, "send_text"):
+            return
+        import re
+        try:
+            with open(path, "r", errors="replace") as f:
+                content = f.read()
+            # Strip ANSI escape codes
+            clean = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', content)
+            lines = clean.split('\n')
+            cmds = []
+            for line in lines:
+                if line.strip():
+                    cmds.append(f"printf '%s\\n' {shlex.quote(line)}")
+                else:
+                    cmds.append("printf '\\n'")
+            os.unlink(path)
+        except Exception:
+            cmds = ["echo '<!-- scrollback replay failed -->'"]
+        if cmds:
+            term.send_text('; '.join(cmds) + '\n')
 
     def _on_tab_changed(self, idx):
         self.terminal_stack.setCurrentIndex(idx)
