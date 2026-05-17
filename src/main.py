@@ -477,6 +477,8 @@ class TerminalPanel(QtWidgets.QWidget):
         file_menu.addAction("New Tab", lambda: self._new_tab("bash"))
         file_menu.addAction("New Window", lambda: self._new_window())
         file_menu.addSeparator()
+        file_menu.addAction("Import Tab from Konsole…", self._import_from_konsole)
+        file_menu.addSeparator()
         file_menu.addAction("Close Tab", lambda: self._close_current_tab(), QtGui.QKeySequence("Ctrl+W"))
         file_menu.addAction("Quit", QtWidgets.QApplication.quit, QtGui.QKeySequence("Ctrl+Q"))
 
@@ -520,6 +522,8 @@ class TerminalPanel(QtWidgets.QWidget):
         menu = QtWidgets.QMenu(self)
         menu.addAction("Duplicate Tab", lambda: self._duplicate_tab(tab_idx))
         menu.addAction("Detach Tab", lambda: self._tear_off_tab(tab_idx))
+        menu.addSeparator()
+        menu.addAction("Import Tab from Konsole…", self._import_from_konsole)
         menu.addSeparator()
         menu.addAction("Detach All Tabs to New Window", lambda: self._detach_all_to_new_window())
         menu.addSeparator()
@@ -658,6 +662,55 @@ class TerminalPanel(QtWidgets.QWidget):
     def _new_window(self):
         import subprocess
         subprocess.Popen(["konsole"], start_new_session=True)
+
+    def _import_from_konsole(self):
+        """List running Konsole sessions via D-Bus and let the user import one."""
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["qdbus6", "org.kde.konsole-6569"],
+                capture_output=True, text=True, timeout=5
+            )
+            sessions = [l.strip() for l in result.stdout.splitlines() if l.strip().startswith("/Sessions/")]
+            if not sessions:
+                QtWidgets.QMessageBox.information(self, "Import Tab", "No Konsole sessions found.")
+                return
+            items = []
+            for spath in sessions:
+                sid = spath.split("/")[-1]
+                title_data = subprocess.run(
+                    ["qdbus6", "--literal", "org.kde.konsole-6569", spath,
+                     "org.kde.konsole.Session.title", "1"],
+                    capture_output=True, text=True, timeout=3
+                ).stdout.strip().strip('"')
+                pid_data = subprocess.run(
+                    ["qdbus6", "--literal", "org.kde.konsole-6569", spath,
+                     "org.kde.konsole.Session.foregroundProcessId"],
+                    capture_output=True, text=True, timeout=3
+                ).stdout.strip()
+                try:
+                    pid = int(pid_data)
+                    cwd = os.path.realpath(f"/proc/{pid}/cwd") if os.path.exists(f"/proc/{pid}/cwd") else ""
+                except ValueError:
+                    cwd = ""
+                label = f"#{sid}: {title_data or 'shell'}"
+                if cwd:
+                    label += f"  ({cwd.replace(os.path.expanduser('~'), '~')})"
+                items.append((label, cwd))
+            # Let user pick
+            from PySide6.QtWidgets import QInputDialog
+            chosen, ok = QInputDialog.getItem(
+                self, "Import Tab from Konsole",
+                "Select a Konsole session tab:",
+                [i[0] for i in items], 0, False
+            )
+            if ok and chosen:
+                idx = next(i for i, (l, _) in enumerate(items) if l == chosen)
+                cwd = items[idx][1]
+                self._new_tab("bash", cwd=cwd or None)
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Import Error",
+                f"Could not reach Konsole via D-Bus.\nIs Konsole running?\n\n{e}")
 
     def _on_tab_changed(self, idx):
         self.terminal_stack.setCurrentIndex(idx)
@@ -971,7 +1024,8 @@ class SessionsPanel(QtWidgets.QWidget):
         self.list_widget.clear()
         for s in sessions_manager.list_sessions():
             title = s.get("title", "Untitled") or "Untitled"
-            ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(s.get("created_at", 0)))
+            display_ts = s.get("updated_at") or s.get("created_at", 0)
+            ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(display_ts))
             count = s.get("message_count", 0)
             source = s.get("source", "unknown")
             model = s.get("model", "")
@@ -1446,6 +1500,18 @@ class HermesMainWindow(QtWidgets.QMainWindow):
             self.chat_panel.show_message.emit(role, msg.get("content", ""))
         self.content_stack.setCurrentIndex(0)
         self.telemetry_panel.log(f"Loaded session {sid} — model: {model_name}")
+        # Highlight Chat in the sidebar
+        agent_list = self.sidebar_splitter.findChild(QtWidgets.QListWidget, "agent_list")
+        if agent_list:
+            for i in range(agent_list.count()):
+                if "Chat" in agent_list.item(i).text():
+                    agent_list.setCurrentRow(i)
+                    # Clear other sidebar selections
+                    for child in self.sidebar_splitter.findChildren(QtWidgets.QListWidget):
+                        if child != agent_list:
+                            child.clearSelection()
+                    break
+            self._update_toolbar("agent", "💬 Chat")
 
     def _handle_chat(self, text):
         # Cancel any in-flight worker by advancing the request counter

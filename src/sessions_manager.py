@@ -105,7 +105,8 @@ def list_sessions() -> List[Dict[str, Any]]:
         rows = conn.execute(
             """
             SELECT s.id, s.title, s.started_at, s.message_count, s.source, s.model, s.billing_provider,
-                   (SELECT content FROM messages WHERE session_id=s.id AND role='user' ORDER BY timestamp LIMIT 1) AS first_user_msg
+                   (SELECT content FROM messages WHERE session_id=s.id AND role='user' ORDER BY timestamp LIMIT 1) AS first_user_msg,
+                   (SELECT timestamp FROM messages WHERE session_id=s.id ORDER BY timestamp DESC LIMIT 1) AS last_msg_at
             FROM sessions s
             ORDER BY s.started_at DESC LIMIT 100
             """
@@ -119,11 +120,12 @@ def list_sessions() -> List[Dict[str, Any]]:
                 title = fu[:50] + ("…" if len(fu) > 50 else "")
             else:
                 title = r["id"][:8]
+        display_ts = r["last_msg_at"] or r["started_at"]
         result.append({
             "id": r["id"],
             "title": title,
             "created_at": r["started_at"],
-            "updated_at": r["started_at"],
+            "updated_at": display_ts,
             "message_count": r["message_count"] or 0,
             "source": r["source"] or "unknown",
             "model": r["model"] if r["model"] else "",
