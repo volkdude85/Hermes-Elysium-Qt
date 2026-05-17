@@ -707,10 +707,42 @@ class TerminalPanel(QtWidgets.QWidget):
             if ok and chosen:
                 idx = next(i for i, (l, _) in enumerate(items) if l == chosen)
                 cwd = items[idx][1]
+                spath = sessions[idx]
+                new_idx = self.tab_bar.count()
                 self._new_tab("bash", cwd=cwd or None)
+                # Fetch scrollback and replay it into the new tab
+                try:
+                    scrollback = subprocess.run(
+                        ["qdbus6", "--literal", "org.kde.konsole-6569", spath,
+                         "org.kde.konsole.Session.getAllDisplayedText"],
+                        capture_output=True, text=True, timeout=5
+                    ).stdout.strip().strip('"')
+                    if scrollback:
+                        import tempfile
+                        tf = tempfile.NamedTemporaryFile(
+                            mode="w", prefix="konsole_import_",
+                            suffix=".txt", delete=False
+                        )
+                        tf.write(scrollback)
+                        tf.close()
+                        QtCore.QTimer.singleShot(
+                            500,
+                            lambda tab_idx=new_idx, path=tf.name: self._replay_scrollback(tab_idx, path)
+                        )
+                except Exception:
+                    pass
         except Exception as e:
             QtWidgets.QMessageBox.warning(self, "Import Error",
                 f"Could not reach Konsole via D-Bus.\nIs Konsole running?\n\n{e}")
+
+    def _replay_scrollback(self, tab_idx: int, path: str):
+        """Replay a tempfile containing Konsole scrollback into the terminal at tab_idx."""
+        w = self.terminal_stack.widget(tab_idx)
+        if not w:
+            return
+        term = w.findChild(QtWidgets.QWidget, "konsole_widget")
+        if term and hasattr(term, "send_text"):
+            term.send_text(f"cat {shlex.quote(path)} 2>/dev/null; rm -f {shlex.quote(path)}\n")
 
     def _on_tab_changed(self, idx):
         self.terminal_stack.setCurrentIndex(idx)
