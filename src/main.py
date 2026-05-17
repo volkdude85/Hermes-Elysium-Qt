@@ -29,7 +29,7 @@ class HermesTrayIcon(QtWidgets.QSystemTrayIcon):
     def __init__(self, app_window, parent=None):
         super().__init__(parent)
         self.app_window = app_window
-        self.setToolTip("Hermes Elysium 🔥🦊")
+        self.setToolTip("Hermes Elysium")
         self.activated.connect(self._activated)
         self._build_menu()
 
@@ -1049,7 +1049,7 @@ class HermesMainWindow(QtWidgets.QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Hermes Elysium 🔥🦊")
+        self.setWindowTitle("Hermes Elysium")
         self.setMinimumSize(720, 420)  # reasonable minimum — allows proper windowed use
         self.resize(1280, 800)
         self._request_seq = 0  # counter for steer/cancel
@@ -1180,9 +1180,9 @@ class HermesMainWindow(QtWidgets.QMainWindow):
             "QSplitter::handle { background: #333; }"
             "QSplitter::handle:hover { background: #e74c3c; }"
         )
-        section_agent = make_section("AGENT", ["Chat", "Sessions", "Profiles", "Skills", "Memory", "Cron", "MCP"])
-        section_workspace = make_section("WORKSPACE", ["Conductor", "Terminal", "Dashboard", "Telemetry", "Gateway Status"])
-        section_config = make_section("CONFIG", ["Models", "Providers", "Voice", "Display", "Theme", "Settings"])
+        section_agent = make_section("AGENT", ["💬 Chat", "📁 Sessions", "🎭 Profiles", "🛠️ Skills", "🧠 Memory", "⏰ Cron", "🔌 MCP"])
+        section_workspace = make_section("WORKSPACE", ["🚂 Conductor", "💻 Terminal", "📊 Dashboard", "📡 Telemetry", "🌐 Gateway Status"])
+        section_config = make_section("CONFIG", ["🧬 Models", "🔗 Providers", "🎙️ Voice", "🖥️ Display", "🎨 Theme", "⚙️ Settings"])
         self.sidebar_splitter.addWidget(section_agent)
         self.sidebar_splitter.addWidget(section_workspace)
         self.sidebar_splitter.addWidget(section_config)
@@ -1299,17 +1299,17 @@ class HermesMainWindow(QtWidgets.QMainWindow):
         elif sender.objectName() == "config_list":
             self._update_toolbar("config", name)
 
-        mapping = {
-            "Chat": 0, "Sessions": 1,
-            "Profiles": 2,
-            "Conductor": 3, "Dashboard": 4,
-            "Terminal": 5, "Telemetry": 6,
-            "Settings": 7, "Models": 7, "Providers": 7,
-            "Voice": 7, "Display": 7, "Theme": 7
+        emoji_map = {
+            "💬 Chat": 0, "📁 Sessions": 1,
+            "🎭 Profiles": 2,
+            "🚂 Conductor": 3, "📊 Dashboard": 4,
+            "💻 Terminal": 5, "📡 Telemetry": 6,
+            "⚙️ Settings": 7, "🧬 Models": 7, "🔗 Providers": 7,
+            "🎙️ Voice": 7, "🖥️ Display": 7, "🎨 Theme": 7,
         }
-        if name in mapping:
-            self.content_stack.setCurrentIndex(mapping[name])
-        if name == "Sessions":
+        if name in emoji_map:
+            self.content_stack.setCurrentIndex(emoji_map[name])
+        if name == "📁 Sessions":
             self.sessions_panel.refresh()
         self.telemetry_panel.log(f"Nav → {name}")
 
@@ -1321,7 +1321,7 @@ class HermesMainWindow(QtWidgets.QMainWindow):
             self.context_toolbar.addAction("Load Session", self._on_load_session)
             self.context_toolbar.addAction("Save Session", self._on_save_session)
             self.context_toolbar.addAction("Clear Chat", lambda: self.chat_panel.chat_display.clear())
-            if item == "Sessions":
+            if "Sessions" in item:
                 self.context_toolbar.addAction("Refresh Sessions", self.sessions_panel.refresh)
         elif context == "workspace":
             self.context_toolbar.addAction("Spawn Subagent", lambda: self.telemetry_panel.log("Spawn subagent"))
@@ -1335,16 +1335,16 @@ class HermesMainWindow(QtWidgets.QMainWindow):
     def _on_left_nav_by_name(self, name: str):
         self._update_toolbar("config", name)
         mapping = {
-            "Chat": 0, "Sessions": 1,
-            "Profiles": 2,
-            "Conductor": 3, "Dashboard": 4,
-            "Terminal": 5, "Telemetry": 6,
-            "Settings": 7, "Models": 7, "Providers": 7,
-            "Voice": 7, "Display": 7, "Theme": 7
+            "💬 Chat": 0, "📁 Sessions": 1,
+            "🎭 Profiles": 2,
+            "🚂 Conductor": 3, "📊 Dashboard": 4,
+            "💻 Terminal": 5, "📡 Telemetry": 6,
+            "⚙️ Settings": 7, "🧬 Models": 7, "🔗 Providers": 7,
+            "🎙️ Voice": 7, "🖥️ Display": 7, "🎨 Theme": 7,
         }
         if name in mapping:
             self.content_stack.setCurrentIndex(mapping[name])
-        if name == "Sessions":
+        if name == "📁 Sessions":
             self.sessions_panel.refresh()
         self.telemetry_panel.log(f"Nav → {name}")
 
@@ -1496,7 +1496,7 @@ class HermesMainWindow(QtWidgets.QMainWindow):
         self.chat_panel.set_thinking(text)
 
     def show_tab(self, name: str):
-        mapping = {"chat": 0, "sessions": 1, "conductor": 2, "dashboard": 3, "terminal": 4, "telemetry": 5, "settings": 6}
+        mapping = {"chat": 0, "sessions": 1, "profiles": 2, "conductor": 3, "dashboard": 4, "terminal": 5, "telemetry": 6, "settings": 7}
         if name in mapping:
             self.content_stack.setCurrentIndex(mapping[name])
         self.show()
