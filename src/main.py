@@ -1183,7 +1183,7 @@ class HermesMainWindow(QtWidgets.QMainWindow):
         )
         section_agent = make_section("AGENT", ["💬 Chat", "📁 Sessions", "🎭 Persona", "🛠️ Skills", "🧠 Memory", "⏰ Cron", "🔌 MCP"])
         section_workspace = make_section("WORKSPACE", ["🚂 Conductor", "💻 Terminal", "📊 Dashboard", "📡 Telemetry", "🌐 Gateway Status"])
-        section_config = make_section("CONTROL", ["🧬 Models", "🔗 Providers", "🎙️ Voice", "🖥️ Display", "🎨 Theme", "⚙️ Settings"])
+        section_config = make_section("CONTROL", ["🧬 Models", "🔗 Providers", "🖥️ Display", "🎨 Theme", "⚙️ Settings"])
         self.sidebar_splitter.addWidget(section_agent)
         self.sidebar_splitter.addWidget(section_workspace)
         self.sidebar_splitter.addWidget(section_config)
