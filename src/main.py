@@ -18,7 +18,8 @@ import health_monitor
 import terminal_embed
 import conductor_panel
 import konsole_embed
-import profiles_panel
+import persona_panel
+import providers_panel
 import auto_updater
 
 
@@ -1180,9 +1181,9 @@ class HermesMainWindow(QtWidgets.QMainWindow):
             "QSplitter::handle { background: #333; }"
             "QSplitter::handle:hover { background: #e74c3c; }"
         )
-        section_agent = make_section("AGENT", ["💬 Chat", "📁 Sessions", "🎭 Profiles", "🛠️ Skills", "🧠 Memory", "⏰ Cron", "🔌 MCP"])
+        section_agent = make_section("AGENT", ["💬 Chat", "📁 Sessions", "🎭 Persona", "🛠️ Skills", "🧠 Memory", "⏰ Cron", "🔌 MCP"])
         section_workspace = make_section("WORKSPACE", ["🚂 Conductor", "💻 Terminal", "📊 Dashboard", "📡 Telemetry", "🌐 Gateway Status"])
-        section_config = make_section("CONFIG", ["🧬 Models", "🔗 Providers", "🎙️ Voice", "🖥️ Display", "🎨 Theme", "⚙️ Settings"])
+        section_config = make_section("CONTROL", ["🧬 Models", "🔗 Providers", "🎙️ Voice", "🖥️ Display", "🎨 Theme", "⚙️ Settings"])
         self.sidebar_splitter.addWidget(section_agent)
         self.sidebar_splitter.addWidget(section_workspace)
         self.sidebar_splitter.addWidget(section_config)
@@ -1226,8 +1227,8 @@ class HermesMainWindow(QtWidgets.QMainWindow):
         self.sessions_panel.session_selected.connect(self._on_session_load)
         self.content_stack.addWidget(self.sessions_panel)
 
-        self.profiles_panel = profiles_panel.ProfilesPanel()
-        self.content_stack.addWidget(self.profiles_panel)
+        self.persona_panel = persona_panel.ProfilesPanel()
+        self.content_stack.addWidget(self.persona_panel)
 
         self.conductor_panel = conductor_panel.ConductorPanel()
         self.content_stack.addWidget(self.conductor_panel)
@@ -1246,6 +1247,9 @@ class HermesMainWindow(QtWidgets.QMainWindow):
         self.settings_panel = SettingsPanel()
         self.settings_panel.model_changed.connect(self._on_model_changed)
         self.content_stack.addWidget(self.settings_panel)
+
+        self.providers_panel = providers_panel.ProvidersPanel()
+        self.content_stack.addWidget(self.providers_panel)
 
         self.chat_panel.message_sent.connect(self._handle_chat)
 
@@ -1290,21 +1294,24 @@ class HermesMainWindow(QtWidgets.QMainWindow):
 
     def _on_left_nav(self, item):
         name = item.text()
-        # Determine which section this item came from
+        # Determine which section this item came from, clear others
         sender = self.sender()
+        for child in self.sidebar_splitter.findChildren(QtWidgets.QListWidget):
+            if child != sender:
+                child.clearSelection()
         if sender.objectName() == "agent_list":
             self._update_toolbar("agent", name)
         elif sender.objectName() == "workspace_list":
             self._update_toolbar("workspace", name)
-        elif sender.objectName() == "config_list":
-            self._update_toolbar("config", name)
+        elif sender.objectName() == "control_list":
+            self._update_toolbar("control", name)
 
         emoji_map = {
             "💬 Chat": 0, "📁 Sessions": 1,
-            "🎭 Profiles": 2,
+            "🎭 Persona": 2,
             "🚂 Conductor": 3, "📊 Dashboard": 4,
             "💻 Terminal": 5, "📡 Telemetry": 6,
-            "⚙️ Settings": 7, "🧬 Models": 7, "🔗 Providers": 7,
+            "⚙️ Settings": 7, "🧬 Models": 7, "🔗 Providers": 8,
             "🎙️ Voice": 7, "🖥️ Display": 7, "🎨 Theme": 7,
         }
         if name in emoji_map:
@@ -1327,19 +1334,19 @@ class HermesMainWindow(QtWidgets.QMainWindow):
             self.context_toolbar.addAction("Spawn Subagent", lambda: self.telemetry_panel.log("Spawn subagent"))
             self.context_toolbar.addAction("Kill All", lambda: self.telemetry_panel.log("Kill all"))
             self.context_toolbar.addAction("Refresh", lambda: self.telemetry_panel.log("Refresh workspace"))
-        elif context == "config":
+        elif context == "control":
             self.context_toolbar.addAction("Apply", lambda: self.telemetry_panel.log("Apply settings"))
             self.context_toolbar.addAction("Reload Config", lambda: self.telemetry_panel.log("Reload config"))
             self.context_toolbar.addAction("Reset Defaults", lambda: self.telemetry_panel.log("Reset defaults"))
 
     def _on_left_nav_by_name(self, name: str):
-        self._update_toolbar("config", name)
+        self._update_toolbar("control", name)
         mapping = {
             "💬 Chat": 0, "📁 Sessions": 1,
-            "🎭 Profiles": 2,
+            "🎭 Persona": 2,
             "🚂 Conductor": 3, "📊 Dashboard": 4,
             "💻 Terminal": 5, "📡 Telemetry": 6,
-            "⚙️ Settings": 7, "🧬 Models": 7, "🔗 Providers": 7,
+            "⚙️ Settings": 7, "🧬 Models": 7, "🔗 Providers": 8,
             "🎙️ Voice": 7, "🖥️ Display": 7, "🎨 Theme": 7,
         }
         if name in mapping:
