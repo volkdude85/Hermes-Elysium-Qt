@@ -1,0 +1,27 @@
+{
+  "tasks": [
+    {
+      "id": "master-launcher-smoke-test",
+      "description": "Master Launcher + Full System Smoke Test: create start_hermes_full.sh, full_system_test.py, update palace/README.md",
+      "status": "completed",
+      "claimed_by": "SuperGrok",
+      "priority": "high",
+      "created": "2026-05-19",
+      "notes": "Completed: scripts created, README updated with one-command and voice commands. System now has clear startup path."
+    },
+    {
+      "id": "voice-first-onboarding",
+      "description": "Voice-First Onboarding + Welcome Sequence: create welcome_sequence.py, hook into launcher with --no-welcome flag, update palace/README.md",
+      "status": "completed",
+      "claimed_by": "SuperGrok",
+      "priority": "high",
+      "created": "2026-05-19",
+      "notes": "Welcome sequence speaks full message, farm status, 5 commands, runs STT test. Hooked into start_hermes_full.sh. README updated."
+    }
+  ],
+  "farm_inventory": {
+    "nodes": ["Garuda-monster", "Porsche", "Laptop", "ROG-Ally"],
+    "status": "stable",
+    "dispatch": "smart_weighted"
+  }
+}

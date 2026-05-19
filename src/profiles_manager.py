@@ -188,7 +188,7 @@ def create_profile(name: str, base_path=None) -> dict:
     skeleton = {
         "SOUL.md": f"# SOUL — {name}\n\nYour core identity, personality, and operating principles.\n",
         "IDENTITY.md": f"# IDENTITY — {name}\n\nName, appearance, backstory, voice.\n",
-        "USER.md": "# USER — Sean\n\nWho the user is, preferences, context.\n",
+        'USER.md': '# USER — volkdude85\n\nWho the user is, preferences, context.\n',
         "TOOLS.md": "# TOOLS\n\nTool capabilities, permissions, and notes.\n",
         "MEMORY.md": "# MEMORY\n\nLong-term memories, lessons learned.\n",
         "HEARTBEAT.md": "# HEARTBEAT\n\nChecklist and reminders for heartbeat polls.\n",

@@ -1,0 +1,2 @@
+set(__QT_DEPLOY_TARGET_hermes_terminal_FILE /home/volkdude/Projects/hermes-elysium/build/libhermes_terminal.so)
+set(__QT_DEPLOY_TARGET_hermes_terminal_TYPE SHARED_LIBRARY)

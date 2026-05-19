@@ -21,6 +21,10 @@ import konsole_embed
 import persona_panel
 import providers_panel
 import auto_updater
+import farm_manager
+
+# STT engines (old + improved)
+STT_USE_IMPROVED = True  # toggle: False = old voice.py, True = voice_improved.py
 
 
 _ICON_DIR = Path(__file__).resolve().parent.parent / "assets"
@@ -132,6 +136,8 @@ class ChatPanel(QtWidgets.QWidget):
         self._pending_start = 0.0
         self._timer = QtCore.QTimer(self)
         self._timer.timeout.connect(self._tick)
+        self._router_model = "qwen3.6:27b"  # current model selected via voice
+        self._router_mode = "auto"          # "auto", "farm", "local", "cloud"
         self._build_ui()
 
     @QtCore.Slot(str, str)
@@ -223,6 +229,7 @@ class ChatPanel(QtWidgets.QWidget):
 
     def set_ready(self):
         self._pending = False
+        self._use_improved_stt = True  # default to improved STT
         self._timer.stop()
         self.send_btn.setEnabled(True)
         self.msg_input.setEnabled(True)
@@ -324,7 +331,12 @@ class ChatPanel(QtWidgets.QWidget):
             self._stop_recording()
 
     def _start_recording(self):
-        from voice import AudioRecorder
+        # Toggle between old and new STT via setting
+        use_improved = getattr(self, '_use_improved_stt', True)
+        if use_improved:
+            from voice_improved import AudioRecorder
+        else:
+            from voice import AudioRecorder
         self._recorder = AudioRecorder(self)
         self._recorder.recorded.connect(self._on_transcribed)
         self._recorder.status.connect(self.thinking_box.setPlainText)
@@ -342,6 +354,11 @@ class ChatPanel(QtWidgets.QWidget):
             self.thinking_box.setPlainText(f"Steering: \"{text[:60]}{'…' if len(text)>60 else ''}\"")
             self.message_sent.emit(text)
         else:
+            # Check for voice routing commands
+            cmd = self._parse_voice_command(text)
+            if cmd:
+                self.thinking_box.setPlainText(cmd)
+                return
             # Normal — append to input box
             current = self.msg_input.toPlainText()
             if current and not current.endswith("\n"):
@@ -350,6 +367,139 @@ class ChatPanel(QtWidgets.QWidget):
             self._resize_input()
             self.msg_input.setFocus()
         self.thinking_box.setPlainText("")
+
+    def _parse_voice_command(self, text: str) -> str:
+        """Detect and execute voice routing commands. Returns feedback text or ''."""
+        t = text.strip().lower()
+
+        # Model selection
+        for model_id in ["qwen3.6:27b", "qwen3.6:14b", "llama3.2:3b",
+                         "deepseek-v3", "deepseek-v4-flash", "claude-sonnet-4",
+                         "claude-3.5-haiku", "kimi-k2.6", "gpt-4o", "gemini-2.0-flash"]:
+            aliases = {
+                "qwen3.6:27b": ["use qwen", "use qwen mtp", "use qwen 3.6", "switch to qwen"],
+                "qwen3.6:14b": ["use qwen 14", "use qwen fast", "switch to qwen 14"],
+                "llama3.2:3b": ["use llama", "use small", "use tiny", "switch to llama"],
+                "deepseek-v4-flash": ["use deepseek", "use deep seek", "switch to deepseek"],
+                "claude-sonnet-4": ["use claude", "use claude sonnet", "switch to claude"],
+                "kimi-k2.6": ["use kimi", "switch to kimi"],
+                "gpt-4o": ["use gpt", "use chat gpt", "switch to gpt"],
+                "gemini-2.0-flash": ["use gemini", "switch to gemini"],
+            }
+            for alias in aliases.get(model_id, []):
+                if text.lower().startswith(alias):
+                    self._router_model = model_id
+                    self._router_mode = "auto"
+                    fb = f"Switched to {model_id}"
+                    self.thinking_box.setPlainText(fb)
+                    self._append_terminal("System", fb)
+                    self._speak_feedback(f"Switched to {model_id.split(':')[0]}")
+                    return fb
+
+        # Mode selection
+        if "send to farm" in t or "route to farm" in t or "use farm" in t:
+            self._router_mode = "farm"
+            fb = "Routing all queries to farm"
+            self.thinking_box.setPlainText(fb)
+            self._append_terminal("System", fb)
+            self._speak_feedback("Routing to farm")
+            return fb
+        if "think locally" in t or "run local" in t or "use local" in t:
+            self._router_mode = "local"
+            fb = "Routing all queries to local Ollama"
+            self.thinking_box.setPlainText(fb)
+            self._append_terminal("System", fb)
+            self._speak_feedback("Using local model")
+            return fb
+        if "use cloud" in t or "route cloud" in t or "route to cloud" in t:
+            self._router_mode = "cloud"
+            fb = "Routing all queries to cloud providers"
+            self.thinking_box.setPlainText(fb)
+            self._append_terminal("System", fb)
+            self._speak_feedback("Using cloud providers")
+            return fb
+        if "auto route" in t or "auto mode" in t or "smart route" in t:
+            self._router_mode = "auto"
+            fb = "Smart routing enabled — auto-selecting best backend"
+            self.thinking_box.setPlainText(fb)
+            self._append_terminal("System", fb)
+            self._speak_feedback("Smart routing enabled")
+            return fb
+
+        # Info commands — use Conductor
+        if "farm status" in t or "farm info" in t or "farm health" in t:
+            from conductor import conductor
+            fb = conductor.farm_status()
+            self.thinking_box.setPlainText(fb)
+            self._append_terminal("System", fb)
+            self._speak_feedback(fb[:100])
+            return fb
+
+        if t.startswith("which node") or t.startswith("route this to"):
+            # Extract node name: "route this to garuda" → garuda
+            target = "garuda"
+            for node in ["garuda", "porsche", "laptop", "rog ally", "rog"]:
+                if node in t:
+                    target = node
+                    break
+            self._router_mode = "farm"
+            self._router_model = "qwen3.6:27b"
+            fb = f"Routing to {target.title()}"
+            self.thinking_box.setPlainText(fb)
+            self._append_terminal("System", fb)
+            self._speak_feedback(f"Routing to {target}")
+            return fb
+
+        if "heavy think" in t or "deep think" in t or "complex" in t:
+            self._router_model = "claude-sonnet-4"
+            self._router_mode = "auto"
+            fb = "Heavy think mode — using Claude Sonnet for deep reasoning"
+            self.thinking_box.setPlainText(fb)
+            self._append_terminal("System", fb)
+            self._speak_feedback("Heavy think mode")
+            return fb
+
+        if "quick answer" in t or "fast answer" in t or "short" in t and "answer" in t:
+            self._router_model = "llama3.2:3b"
+            self._router_mode = "local"
+            fb = "Quick answer mode — using lightweight local model"
+            self.thinking_box.setPlainText(fb)
+            self._append_terminal("System", fb)
+            self._speak_feedback("Quick answer mode")
+            return fb
+
+        if "list models" in t or "available models" in t or "what models" in t:
+            from conductor import conductor
+            fb = conductor.list_available_models()
+            self.thinking_box.setPlainText(fb)
+            self._append_terminal("System", fb)
+            self._speak_feedback(fb)
+            return fb
+
+        if t.startswith("task status") or t.startswith("task info"):
+            from conductor import conductor
+            fb = conductor.task_summary()
+            self.thinking_box.setPlainText(fb)
+            self._append_terminal("System", fb)
+            self._speak_feedback(fb[:100])
+            return fb
+
+        return ""
+
+    def _speak_feedback(self, text: str):
+        """Quick voice feedback via espeak-ng — non-blocking."""
+        try:
+            import subprocess as _sp
+            _sp.Popen(
+                ["espeak-ng", "-s", "150", "-g", "5", text],
+                stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+            )
+        except Exception:
+            pass  # TTS is best-effort
+
+    def get_router_state(self) -> tuple[str, str]:
+        """Return (model, mode) for use by the main loop."""
+        return self._router_model, self._router_mode
 
 
 class DashboardPanel(QtWidgets.QWidget):
@@ -364,7 +514,7 @@ class DashboardPanel(QtWidgets.QWidget):
         self.layout().addWidget(header)
 
         cards = QtWidgets.QHBoxLayout()
-        for label in ["Sessions", "Messages", "Tokens", "Skills"]:
+        for label in ["Sessions", "Messages", "Tokens", "Skills", "Farm"]:
             gb = QtWidgets.QGroupBox(label)
             gb.setStyleSheet("QGroupBox { color: #aaa; border: 1px solid #333; padding-top: 8px; }")
             l = QtWidgets.QVBoxLayout(gb)
@@ -378,10 +528,43 @@ class DashboardPanel(QtWidgets.QWidget):
         self.metrics = QtWidgets.QFormLayout()
         self.active_model = QtWidgets.QLabel("—")
         self.provider_status = QtWidgets.QLabel("—")
+        self.farm_status = QtWidgets.QLabel("🌐 Farm: checking…")
         self.metrics.addRow("Active Model:", self.active_model)
         self.metrics.addRow("Provider:", self.provider_status)
+        self.metrics.addRow("Farm:", self.farm_status)
         self.layout().addLayout(self.metrics)
         self.layout().addStretch(1)
+
+        # Poll farm status every 5s
+        self._farm_timer = QtCore.QTimer(self)
+        self._farm_timer.timeout.connect(self._poll_farm)
+        self._farm_timer.start(5000)
+        self._poll_farm()
+
+    def _poll_farm(self):
+        try:
+            from farm_manager import farm
+            s = farm.get_status()
+            count = s.get("count", 0)
+            if count == 0:
+                self.farm_status.setText("🌐 Farm: offline")
+                return
+            nodes = s.get("nodes", [])
+            lines = []
+            active_total = 0
+            for n in nodes:
+                name = n.get("name", "?")
+                load = n.get("load", 0)
+                active = n.get("active_tasks", 0)
+                hb = n.get("last_heartbeat_sec_ago", -1)
+                reg = "✓" if n.get("fully_registered") else "…"
+                active_total += active
+                lines.append(f"  {reg} {name}: load={load} tasks={active} hb={hb}s")
+            self.farm_status.setText(
+                f"🌐 Farm: {count} nodes ({active_total} active tasks)\n" + "\n".join(lines)
+            )
+        except Exception:
+            self.farm_status.setText("🌐 Farm: error")
 
     def update_metrics(self, model: str, provider: str, sessions: int, tokens: int):
         self.active_model.setText(model)
@@ -1214,6 +1397,10 @@ class HermesMainWindow(QtWidgets.QMainWindow):
         tools_menu.addAction("Skills Hub")
         tools_menu.addAction("Cron Jobs")
         tools_menu.addAction("MCP Servers")
+        self._stt_toggle = tools_menu.addAction("✓ Improved STT")
+        self._stt_toggle.setCheckable(True)
+        self._stt_toggle.setChecked(True)
+        self._stt_toggle.triggered.connect(self._toggle_stt_mode)
 
         help_menu = menubar.addMenu("Help")
         help_menu.addAction("Docs")
@@ -1573,65 +1760,81 @@ class HermesMainWindow(QtWidgets.QMainWindow):
         if self.current_session_id:
             sessions_manager.append_message(self.current_session_id, "user", text)
 
+        # Get current router state from the chat panel
+        router_model, router_mode = self.chat_panel.get_router_state()
+
+        # Import the backend router and conductor
+        from backend_router import router
+        from conductor import conductor, RouteDecision
+
         cfg = config_reader.load_config()
         default_model = config_reader.get_default_model(cfg) or ""
 
-        # Detect if this session was originally a cloud session
+        # Determine session model
         s = sessions_manager.load_session(self.current_session_id) if self.current_session_id else None
         session_model = s.get("model", "") if s else ""
-        session_provider = s.get("billing_provider", "") if s else ""
 
-        # All routing goes through Ollama — it handles local models directly and
-        # :cloud variants as proxy models (billing_provider=ollama-cloud). The
-        # Hermes gateway at localhost:8642 is not used by this shell.
-        client = api_client.OllamaClient()
-        local_models = client.list_models()
-        # Try session model, then :cloud variant, then fallback to small model
-        model = None
+        # Resolve which model to use
+        model = router_model or default_model or "qwen3.6:27b"
         if session_model:
-            if session_model in local_models:
-                model = session_model
-            elif f"{session_model}:cloud" in local_models:
-                model = f"{session_model}:cloud"
-        if not model:
-            if default_model in local_models:
-                model = default_model
-            else:
-                for cand in ["dolphin3:latest", "qwen2.5:7b", "nemotron-3-nano:4b", "dolphin-mistral:latest"]:
-                    if cand in local_models:
-                        model = cand
-                        break
-                if not model:
-                    model = local_models[0] if local_models else "qwen3.5:27b"
-        self.telemetry_panel.log(f"Chat → {model} (ollama)")
-        self.sysmon.set_model(model)
+            model = session_model
 
-        # Load full history for this session
+        # Resolve routing mode
+        tt = "inference"
+        if router_mode == "farm":
+            tt = "inference"
+        elif router_mode == "local":
+            tt = "inference"
+        elif router_mode == "cloud":
+            tt = "inference"
+        # auto mode = let router decide via think()
+
+        self.telemetry_panel.log(f"Chat → {model} (mode={router_mode})")
+        self.sysmon.set_model(model)
+        self.telemetry_widget.set_status("Working", model)
+
+        # Load full session history
         history = []
         if self.current_session_id:
             if s:
-                history = [api_client.ChatMessage(role=m["role"], content=m["content"]) for m in s.get("messages", [])]
-        messages = history + [api_client.ChatMessage(role="user", content=text)]
+                history = [{"role": m["role"], "content": m["content"]} for m in s.get("messages", [])]
 
-        self.telemetry_widget.set_status("Working", model)
-        self.chat_panel.set_thinking("Hermes is thinking…")
+        # Build system prompt
+        system_prompt = s.get("system", "") if s else ""
 
         def worker():
             try:
-                # If superseded by a steer, abort immediately
                 if this_seq != self._request_seq:
                     return
                 t0 = time.time()
-                response = client.chat(model, messages)
+
+                # Determine routing hint — force if user specified mode
+                if router_mode == "farm":
+                    # Force farm routing by sending a farm dispatch hint
+                    response = router.chat(text, model=model, system=system_prompt, task_type="inference")
+                elif router_mode == "local":
+                    # Force local: ensure we're calling Ollama directly
+                    from backend_router import _ollama_chat
+                    messages = [{"role": "user", "content": text}]
+                    response = _ollama_chat(model, messages)
+                elif router_mode == "cloud":
+                    response = router.chat(text, model=model, system=system_prompt, task_type="heavy_inference")
+                else:
+                    # Auto mode — let think() decide based on length
+                    response = router.think(text, system=system_prompt)
+
                 latency = (time.time() - t0) * 1000
                 self.latency_changed.emit(latency)
                 self.status_changed.emit("Idle", model)
                 self.response_received.emit(response)
                 self.thinking_received.emit("")
-                self.telemetry_logged.emit(f"Response ← {latency:.0f}ms")
+                self.telemetry_logged.emit(f"Response ← {latency:.0f}ms ({model})")
+
+                # Record routing decision with Conductor
+                location = "farm" if router_mode == "farm" else "local" if router_mode == "local" else "cloud" if router_mode == "cloud" else "local"
+                conductor.record_decision(text, model, location, tt or "auto", latency)
                 if self.current_session_id:
                     sessions_manager.append_message(self.current_session_id, "assistant", response)
-                # Track tokens (rough: ~4 chars per token)
                 input_tokens = len(text) // 4
                 output_tokens = len(response) // 4
                 self.sysmon.add_tokens(input_tokens, output_tokens)
@@ -1700,6 +1903,12 @@ class HermesMainWindow(QtWidgets.QMainWindow):
             self._updater.stop()
             self.auto_update_action.setText("✗ Auto-Update (disabled)")
             self.telemetry_panel.log("Auto-update: disabled")
+
+    def _toggle_stt_mode(self, checked: bool):
+        """Toggle between voice.py (legacy) and voice_improved.py (new)."""
+        self._use_improved_stt = checked
+        self._stt_toggle.setText("✓ Improved STT" if checked else "  Old STT")
+        self.telemetry_panel.log(f"STT: {'improved' if checked else 'legacy'} model")
 
 
 def main():

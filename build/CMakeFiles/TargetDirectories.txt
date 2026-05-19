@@ -1,0 +1,5 @@
+/home/volkdude/Projects/hermes-elysium/build/CMakeFiles/hermes_terminal.dir
+/home/volkdude/Projects/hermes-elysium/build/CMakeFiles/edit_cache.dir
+/home/volkdude/Projects/hermes-elysium/build/CMakeFiles/rebuild_cache.dir
+/home/volkdude/Projects/hermes-elysium/build/CMakeFiles/hermes_terminal_autogen_timestamp_deps.dir
+/home/volkdude/Projects/hermes-elysium/build/CMakeFiles/hermes_terminal_autogen.dir

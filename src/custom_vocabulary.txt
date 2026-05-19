@@ -1,0 +1,71 @@
+# Sean's Custom Vocabulary for STT
+# One phrase per line. The model will bias toward recognizing these.
+# Family / Personal
+Michelle
+Scott
+Robin
+Volk
+Newberg
+Oregon
+
+# Health / Medical
+PTSD
+IBS
+dissociative
+flashback
+cannabis
+medical marijuana
+THC
+CBD
+sativa
+indica
+edible
+vape
+
+# Tech / Projects
+MemPalace
+MemPal
+Elysium
+Herald
+Project-Q
+Project Q
+KWin
+Wayland
+Qt6
+PySide6
+CMake
+OpenCLaw
+Hermes
+Block
+Porsche
+
+# AI / Models
+Grok
+xAI
+Kimi
+DeepSeek
+Claude
+Nora
+
+# Computing
+Arch Linux
+Artix
+OpenRC
+Garuda
+RTX 4090
+CUDA
+docker
+systemd
+flatpak
+AUR
+yay
+
+# Actions / Work
+deploy
+compile
+build
+farm
+mesh
+node
+worker
+coordinator

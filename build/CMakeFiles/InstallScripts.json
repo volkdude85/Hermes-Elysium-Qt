@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/volkdude/Projects/hermes-elysium/build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

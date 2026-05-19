@@ -4,6 +4,7 @@ import time
 import threading
 from pathlib import Path
 from PySide6 import QtCore, QtGui, QtWidgets
+from farm_manager import farm
 
 
 def _read_net_speed(prev, now):
@@ -154,6 +155,11 @@ class HealthBar(QtWidgets.QFrame):
         self._layout.setSpacing(12)
         self._build_widgets()
         monitor.tick.connect(self._update)
+        # Poll farm status every 5s
+        self._farm_timer = QtCore.QTimer(self)
+        self._farm_timer.timeout.connect(self._poll_farm)
+        self._farm_timer.start(5000)
+        self._poll_farm()
 
     def _make_stat(self, icon: str, tooltip: str, min_w: int = 85) -> QtWidgets.QLabel:
         lbl = QtWidgets.QLabel(f"{icon} —")
@@ -173,6 +179,7 @@ class HealthBar(QtWidgets.QFrame):
         self._tokens_lbl = self._make_stat("🔤", "Tokens in → out (this session burst)", 150)
         self._tps_lbl = self._make_stat("⚡", "Tokens per second", 90)
         self._model_lbl = self._make_stat("🤖", "Active model", 130)
+        self._farm_lbl = self._make_stat("🌐", "Farm status", 220)
         self._layout.addStretch(1)
 
     def _color(self, val, high_warn=70, high_bad=90, invert=False) -> str:
@@ -217,3 +224,12 @@ class HealthBar(QtWidgets.QFrame):
         self._tps_lbl.setStyleSheet(f"font-family: monospace; font-size: 11px; color: {c};")
 
         self._model_lbl.setText(f"🤖 {d['model']}")
+
+    def _poll_farm(self):
+        """Update farm status label every 5s."""
+        try:
+            summary = farm.status_summary()
+        except Exception:
+            summary = "🌐 Farm: error"
+        self._farm_lbl.setText(summary)
+        self._farm_lbl.setStyleSheet("font-family: monospace; font-size: 11px; color: #b0b0b0;")
