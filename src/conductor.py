@@ -135,13 +135,111 @@ class Conductor:
             parts.append(f"{m['id'].split(':')[0]} on {loc}")
         return "Available models: " + ", ".join(parts)
 
-    def route_info(self, model: str = "qwen3.6:27b") -> str:
-        """Speakable route info."""
+    def route_voice(self, text: str) -> str:
+        """Auto-route STT voice output through 13-model registry.
+
+        Decision tree:
+        1. Voice commands (model/mode switching) → executed immediately
+        2. Farm/status queries → conductor methods
+        3. Everything else → router.think() (auto-selects local/farm/cloud)
+
+        Returns the response text. Side-effect: speaks result via espeak-ng.
+        """
+        lower = text.lower().strip()
+
+        # Voice stop commands
+        if lower in ("stop voice", "exit voice", "quit voice"):
+            self.speak("Voice stopped")
+            return "Voice loop stopped."
+
+        # Farm queries
+        if any(kw in lower for kw in ("farm status", "farm info", "farm health")):
+            result = self.farm_status()
+            self.speak(result[:120])
+            return result
+
+        # Task queries
+        if any(kw in lower for kw in ("task status", "task info")):
+            result = self.task_summary()
+            self.speak(result[:120])
+            return result
+
+        # Model listing
+        if "list model" in lower or "available model" in lower:
+            result = self.list_available_models()
+            self.speak(result[:120])
+            return result
+
+        # Model switching voice commands
+        model_aliases = {
+            "use qwen 3.6": "qwen3.6:27b",
+            "use qwen": "qwen3.6:27b",
+            "use qwen 14": "qwen3.6:14b",
+            "use llama": "llama3.2:3b",
+            "use deepseek": "deepseek-v4-flash",
+            "use claude": "claude-sonnet-4",
+            "use kimi": "kimi-k2.6",
+            "use gpt": "gpt-4o",
+            "use gemini": "gemini-2.0-flash",
+        }
+        for alias, model_id in model_aliases.items():
+            if lower.startswith(alias):
+                self.current_model = model_id
+                msg = f"Switched to {model_id}"
+                self.speak(msg)
+                return msg
+
+        # Mode switching
+        if "send to farm" in lower or "route to farm" in lower:
+            self.current_mode = "farm"
+            msg = "Routing to farm"
+            self.speak(msg)
+            return msg
+        if "think locally" in lower or "use local" in lower:
+            self.current_mode = "local"
+            msg = "Using local Ollama"
+            self.speak(msg)
+            return msg
+        if "use cloud" in lower:
+            self.current_mode = "cloud"
+            msg = "Routing to cloud"
+            self.speak(msg)
+            return msg
+        if "auto route" in lower or "smart route" in lower:
+            self.current_mode = "auto"
+            msg = "Smart routing enabled"
+            self.speak(msg)
+            return msg
+
+        # Heavy/quick hints
+        if "heavy think" in lower or "deep think" in lower:
+            self.current_model = "claude-sonnet-4"
+            msg = "Heavy think mode — using Claude"
+            self.speak(msg)
+            return msg
+        if "quick answer" in lower:
+            self.current_model = "llama3.2:3b"
+            self.current_mode = "local"
+            msg = "Quick answer mode — local lightweight model"
+            self.speak(msg)
+            return msg
+
+        # Default: route through the 13-model registry
+        self.speak("Thinking")
+        t0 = time.time()
         self._ensure_router()
         try:
-            return self._router.route_info(model)
-        except Exception:
-            return f"No route info for {model}"
+            response = self._router.think(text)
+            latency = (time.time() - t0) * 1000
+            self.record_decision(text, self.current_model, self.current_location,
+                                  "voice", latency)
+            # Speak first 250 chars
+            self.speak(response[:250])
+            return response
+        except Exception as e:
+            err = f"Voice routing error: {e}"
+            self.speak("Sorry, routing failed")
+            return err
 
     # ── Task tracking ─────────────────────────────────────────────
 
@@ -307,9 +405,9 @@ class Conductor:
         # Health score: weighted assessment
         score = 100
 
-        # Farm factor: -20 if offline, -5 per stale heartbeat (>30s)
+        # Farm factor: -40 if coordinator is dead (no nodes), -5 per stale heartbeat (>30s)
         if not status["farm"]["online"]:
-            score -= 20
+            score -= 40
         else:
             for n in status["farm"]["nodes"]:
                 hb = n.get("heartbeat_sec_ago", -1)

@@ -23,6 +23,12 @@ import providers_panel
 import auto_updater
 import farm_manager
 
+# Early Palace load for L0+L1 before any agent context
+sys.path.insert(0, "/home/volkdude/Projects/Mampalus/mempalace")
+from mempalace.layers import early_wakeup
+print("[HERMES] Early wakeup L0+L1 triggered")
+context = early_wakeup()
+
 # STT engines (old + improved)
 STT_USE_IMPROVED = True  # toggle: False = old voice.py, True = voice_improved.py
 
@@ -1909,6 +1915,176 @@ class HermesMainWindow(QtWidgets.QMainWindow):
         self._use_improved_stt = checked
         self._stt_toggle.setText("✓ Improved STT" if checked else "  Old STT")
         self.telemetry_panel.log(f"STT: {'improved' if checked else 'legacy'} model")
+
+
+# ---------------------------------------------------------------------------
+# NoraAI3_12_personal — wild-mode voice chat loop
+# Streaming STT with sounddevice + faster_whisper + conductor auto-routing
+# ---------------------------------------------------------------------------
+
+class NoraAI3_12_personal:
+    """Full wild-mode voice chat loop — streaming STT, conductor routing, voice feedback.
+
+    Usage:
+        from main import NoraAI3_12_personal
+        n = NoraAI3_12_personal()
+        n.voice_chat_loop()
+    """
+
+    def __init__(self):
+        self._running = False
+        self._model = None
+        self._vocab = None
+        self._fs = 16000        # sample rate
+        self._block_duration = 1.0  # seconds per audio block
+        self._silence_threshold = 0.02     # RMS energy floor
+        self._silence_chunks = 0
+        self._max_silence_chunks = 2  # stop after 2s silence
+        self._speech_buffer = []
+
+    def _load_model(self):
+        if self._model is None:
+            import os as _os
+            _os.environ.setdefault("WHISPER_VERBOSE", "0")
+            from faster_whisper import WhisperModel
+            model_name = _os.environ.get("WHISPER_MODEL", "medium")
+            device = _os.environ.get("WHISPER_DEVICE", "cpu")
+            compute = _os.environ.get("WHISPER_COMPUTE", "int8")
+            print(f"[NoraAI] Loading faster-whisper {model_name} ({device}/{compute})…")
+            t0 = time.time()
+            self._model = WhisperModel(model_name, device=device, compute_type=compute)
+            print(f"[NoraAI] Model loaded in {time.time()-t0:.1f}s")
+
+    def _load_vocab(self):
+        if self._vocab is None:
+            from voice_improved import _load_custom_vocab
+            self._vocab = _load_custom_vocab()
+
+    def _transcribe_chunk(self, audio: "numpy.ndarray") -> str:
+        """Transcribe a single audio chunk via faster-whisper with VAD + vocab bias."""
+        self._load_model()
+        self._load_vocab()
+        import numpy as np
+        # Normalize to [-1, 1] if needed
+        if audio.dtype != np.float32:
+            audio = audio.astype(np.float32) / 32768.0
+        audio = audio.squeeze()
+        if audio.ndim > 1:
+            audio = audio.mean(axis=1)
+        if audio.size < 500:
+            return ""
+        try:
+            from voice_improved import VAD_FILTER, VAD_PARAMETERS, TRANSCRIBE_KWARGS
+        except ImportError:
+            VAD_FILTER = True
+            VAD_PARAMETERS = {
+                "threshold": 0.25,
+                "min_speech_duration_ms": 150,
+                "max_speech_duration_s": 30.0,
+                "min_silence_duration_ms": 300,
+            }
+            TRANSCRIBE_KWARGS = {
+                "language": "en", "beam_size": 3, "best_of": 5,
+                "temperature": 0.0, "condition_on_previous_text": False,
+                "no_speech_threshold": 0.3, "compression_ratio_threshold": 2.4,
+                "word_timestamps": False, "without_timestamps": True,
+            }
+        kwargs = dict(TRANSCRIBE_KWARGS)
+        kwargs["initial_prompt"] = self._vocab
+        kwargs.setdefault("vad_filter", VAD_FILTER)
+        kwargs.setdefault("vad_parameters", VAD_PARAMETERS)
+        segments, _info = self._model.transcribe(audio, **kwargs)
+        text = " ".join(s.text.strip() for s in segments)
+        return text
+
+    def _on_audio_block(self, indata, _frames, _time_info, _status):
+        """sounddevice callback — accumulate speech, detect silence, transcribe."""
+        import numpy as np
+        rms = np.sqrt(np.mean(indata ** 2))
+        if rms > self._silence_threshold:
+            self._speech_buffer.append(indata.copy())
+            self._silence_chunks = 0
+        else:
+            self._silence_chunks += 1
+            if self._silence_chunks >= self._max_silence_chunks and self._speech_buffer:
+                # silence detected after speech — transcribe
+                audio = np.concatenate(self._speech_buffer)
+                self._speech_buffer.clear()
+                self._silence_chunks = 0
+                text = self._transcribe_chunk(audio)
+                if text.strip():
+                    self._on_transcribed(text.strip())
+
+    def _on_transcribed(self, text: str):
+        """Route transcribed text through conductor.route_voice() → 13-model registry → espeak-ng feedback."""
+        print(f"\033[92m[Voice →]\033[0m {text}")
+
+        # Route through conductor's unified voice routing
+        try:
+            from conductor import conductor
+            result = conductor.route_voice(text)
+            if result and result.startswith("Voice loop stopped"):
+                self._running = False
+            elif result:
+                print(f"\033[96m[Hermes →]\033[0m {result[:200]}")
+        except Exception as e:
+            print(f"\033[91m[NoraAI] Error: {e}\033[0m")
+
+    def voice_chat_loop(self, sample_rate: int = 16000, block_duration: float = 1.0):
+        """Continuous voice chat loop — streaming STT + routing.
+
+        Press Ctrl+C to stop. Uses sounddevice for real-time audio capture
+        with faster-whisper medium model + VAD. Output routes through
+        conductor's 13-model registry (local Ollama first, farm second, cloud third).
+        """
+        import sounddevice as sd
+        import numpy as np
+
+        print("\033[95m" + "=" * 60 + "\033[0m")
+        print("\033[95m  NoraAI3_12_personal — Wild Mode Voice Chat\033[0m")
+        print("\033[95m  Streaming STT + Conductor Routing + 13 Models\033[0m")
+        print("\033[95m  Speak naturally. Say 'stop voice' to exit.\033[0m")
+        print("\033[95m" + "=" * 60 + "\033[0m\n")
+
+        self._running = True
+        self._fs = sample_rate
+        self._block_duration = block_duration
+        self._speech_buffer.clear()
+        self._silence_chunks = 0
+
+        # Preload model so first chunk isn't slow
+        self._load_model()
+        self._load_vocab()
+
+        try:
+            with sd.InputStream(
+                samplerate=sample_rate,
+                channels=1,
+                dtype="float32",
+                blocksize=int(sample_rate * block_duration),
+                callback=self._on_audio_block,
+            ):
+                while self._running:
+                    sd.sleep(100)
+        except KeyboardInterrupt:
+            print("\n\033[93m[NoraAI] Interrupted — voice loop stopped\033[0m")
+        except Exception as e:
+            print(f"\033[91m[NoraAI] Stream error: {e}\033[0m")
+        finally:
+            self._running = False
+            print("\033[93m[NoraAI] Voice chat loop ended\033[0m")
+
+
+# ── Module-level test entry point ─────────────────────────────────────
+
+if __name__ == "__main__":
+    import sys as _sys
+    if _sys.argv[-1] == "--voice":
+        n = NoraAI3_12_personal()
+        n.voice_chat_loop()
+    else:
+        print("Usage: python3 main.py --voice   (launches voice chat loop)")
+        print("       or import NoraAI3_12_personal and call .voice_chat_loop()")
 
 
 def main():

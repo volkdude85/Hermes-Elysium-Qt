@@ -17,10 +17,42 @@
       "priority": "high",
       "created": "2026-05-19",
       "notes": "Welcome sequence speaks full message, farm status, 5 commands, runs STT test. Hooked into start_hermes_full.sh. README updated."
+    },
+    {
+      "id": "git-commit-push-integration",
+      "description": "Git Commit & Push Everything across project-q, Hermes-Elysium-Qt-Native, hermes-elysium, palace",
+      "status": "completed",
+      "claimed_by": "SuperGrok",
+      "priority": "high",
+      "created": "2026-05-19",
+      "notes": "Committed changes in all folders and pushed. Repos updated with hashes 5d3aa0d project-q, 1656beb hermes-elysium, bfc2cdd Hermes-Elysium-Qt-Native, cbf4872 palace."
+    },
+    {
+      "id": "coordinator-auto-start-reliability",
+      "description": "Fix Herald Coordinator Auto-Start + Full Reliability: debug C++ binary path, add port preflight, fix launcher to start coordinator before workers, update health score to -40 for dead coordinator",
+      "status": "completed",
+      "claimed_by": "DeepSeek-V4-Flash",
+      "priority": "high",
+      "created": "2026-05-19",
+      "notes": "Three root causes: (1) launcher referenced herald_coordinator.py (doesn't exist) instead of build/project-qd C++ binary, (2) no port preflight to kill stale processes, (3) welcome_sequence.py not found hung the startup. Fixed: corrected binary paths to build/project-qd --coordinator --tcp-port 9100 --udp-port 9101 --node-name garuda, added _kill_stale_on_ports() and _verify_coordinator_bin() preflights, coordinator now starts first with port verification, health score penalty increased from -20 to -40 for dead coordinator. End-to-end verified: start/stop works clean, coordinator + worker + hermes-python all start in order, health score drops to 60 when coordinator is dead."
+    },
+    {
+      "id": "clean-logs-production-ready-launcher",
+      "description": "Clean Logs + Production-Ready Launcher: split coordinator/worker debug from errors, add --quiet flag, final validation pass",
+      "status": "completed",
+      "claimed_by": "DeepSeek-V4-Flash",
+      "priority": "high",
+      "created": "2026-05-19",
+      "notes": "Split coordinator/worker logs: stderr goes to coordinator.log, stdout debug to coordinator-debug.log. Added --quiet/-q flag that suppresses everything except errors. Auto-rotates logs >1MB. Final validation 15/15 tests pass, health score 100, stop/start/status all clean. Daily-driver ready."
     }
   ],
   "farm_inventory": {
-    "nodes": ["Garuda-monster", "Porsche", "Laptop", "ROG-Ally"],
+    "nodes": [
+      "Garuda-monster",
+      "Porsche",
+      "Laptop",
+      "ROG-Ally"
+    ],
     "status": "stable",
     "dispatch": "smart_weighted"
   }
